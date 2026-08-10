@@ -1,111 +1,140 @@
 TransitionWidget
-=================
+================
 
-``TransitionWidget`` blends between two widgets over time using one of several built-in
-cinematic effects, or a custom one. It works as a full-screen swap or scoped to a single widget
-inside a layout.
+``TransitionWidget`` blends between two widgets over time using one of six
+built-in cinematic effects or a custom one. It works as a full-screen
+swap or scoped to a single widget inside a layout.
 
 When to Use
 -----------
 
-Use ``TransitionWidget`` for a wizard, a slide deck, a "press space to continue" demo, or a
-game's menu-to-level change: anywhere a screen change should animate instead of cutting
-instantly. Two placements are common:
+Use ``TransitionWidget`` for a wizard, a slide deck, a "press space to
+continue" demo or a game's menu-to-level change: anywhere a screen change
+should animate instead of cutting instantly. Two placements are common:
 
-* **Full-screen.** The ``TransitionWidget`` is the app's root; every screen change goes through
-  it.
-* **Scoped to one widget.** The rest of the layout (sidebar, header, status bar) stays put, and
-  only one panel changes content with a transition.
+* **Full-screen.** The ``TransitionWidget`` is the app's root; every screen
+  change goes through it.
+* **Scoped to one widget.** The rest of the layout (sidebar, header, status
+  bar) stays put and only one panel changes content with a transition.
 
 Basic Usage
 -----------
 
-.. code-block:: php
+::
 
+    use Symfony\Component\Tui\Transition\Direction\HorizontalDirection;
     use Symfony\Component\Tui\Transition\SlideTransition;
-    use Symfony\Component\Tui\Transition\TransitionDirection;
-    use Symfony\Component\Tui\Transition\TransitionWidget;
+    use Symfony\Component\Tui\Widget\TransitionWidget;
 
     $stage = new TransitionWidget();
     $stage->expandVertically(true);
     $tui->add($stage);
 
-    $stage->start($screenA, $screenB, new SlideTransition(TransitionDirection::Left), 0.5);
+    $stage->start(
+        $screenA,
+        $screenB,
+        new SlideTransition(HorizontalDirection::Left),
+        0.5,
+    );
 
-``start()`` takes the current widget, the destination widget, a transition strategy and a
-duration in seconds. Once the ``TransitionWidget`` is attached to a running Tui, it schedules
-its own ticks and advances the animation automatically (no manual ``tick()`` call or
-``Tui::onTick()`` wiring needed).
+``start()`` takes the current widget, the destination widget, a transition
+strategy and a duration in seconds. The duration must be greater than zero.
+Once the ``TransitionWidget`` is attached to a running Tui, it schedules its
+own ticks and advances the animation automatically. You don't need to call
+``tick()`` manually or wire ``Tui::onTick()``.
 
 .. tip::
 
-    ``start()`` does not recreate your widgets: it animates between the two instances you pass
-    in and keeps them. A counter keeps its value, an input keeps its text, a list keeps its
-    selection. Reuse the same instance across calls to preserve state; build a fresh widget only
-    when you want to reset it.
+    ``start()`` does not recreate your widgets: it animates between the two
+    instances you pass in and keeps them. A counter keeps its value, an input
+    keeps its text and a list keeps its selection. Reuse the same instance
+    across calls to preserve state; build a fresh widget only when you want to
+    reset it.
 
 Chaining Transitions
----------------------
+--------------------
 
-Call ``start()`` again to move to a new screen. ``getTo()`` always returns whatever the last
-call's destination was, so it doubles as the next call's source::
+Call ``start()`` again to move to a new screen. ``getTo()`` always returns the
+last call's destination, so it can be the next call's source::
 
-    $stage->start($stage->getTo(), $screenC, new WipeTransition(TransitionDirection::Right), 0.4);
+    use Symfony\Component\Tui\Transition\WipeTransition;
 
-Build a fresh transition instance on every call if the direction, easing or duration needs to
-change between navigations: transitions are cheap, stateless value objects.
+    $stage->start(
+        $stage->getTo(),
+        $screenC,
+        new WipeTransition(HorizontalDirection::Right),
+        0.4,
+    );
+
+Direction and size are fixed when you construct a transition. Easing is stored
+on the transition instance. Use separate instances when these settings differ
+between navigations.
 
 Direction
 ---------
 
-Most transitions take a ``TransitionDirection`` in their constructor. Each transition only
-accepts the subset that makes sense for it; passing an unsupported case throws an
-``InvalidArgumentException`` at construction:
+Transitions use three direction enums:
 
-- ``Left``, ``Right``, ``Top``, ``Bottom``: ``SlideTransition``, ``WipeTransition``.
-- ``Horizontal``, ``Vertical``: ``SliceTransition``, ``ShuttersTransition``.
-- ``In``, ``Out``: ``DiamondTransition``, ``SpiralTransition``.
+* ``HorizontalDirection::Left`` and ``HorizontalDirection::Right`` select a
+  horizontal entrance edge.
+* ``VerticalDirection::Top`` and ``VerticalDirection::Bottom`` select a
+  vertical entrance edge.
+* ``RadialDirection::Inward`` and ``RadialDirection::Outward`` select whether
+  a radial reveal travels toward or away from the center.
+
+``SlideTransition``, ``WipeTransition``, ``SliceTransition`` and
+``ShuttersTransition`` accept either ``HorizontalDirection`` or
+``VerticalDirection``. ``DiamondTransition`` and ``SpiralTransition`` accept
+``RadialDirection``. The constructor types let static analysis reject an
+incompatible direction.
 
 ::
 
-    use Symfony\Component\Tui\Transition\TransitionDirection;
+    use Symfony\Component\Tui\Transition\Direction\VerticalDirection;
 
-    $slide = new SlideTransition(TransitionDirection::Top);
+    $slide = new SlideTransition(VerticalDirection::Top);
 
 Easing
 ------
 
-Pass any ``callable(float): float`` to ``setEasing()`` to change the pacing of a transition. It
-receives the linear progress (``0.0`` to ``1.0``) and returns the adjusted value::
+Pass any ``callable(float): float`` to ``setEasing()`` to change the pacing of
+a transition. It receives the linear progress (``0.0`` to ``1.0``) and returns
+the adjusted value::
 
-    $transition = (new SlideTransition())->setEasing(fn (float $p) => $p * $p); // ease-in
+    $transition = (new SlideTransition())->setEasing(
+        fn (float $progress) => $progress * $progress,
+    );
 
-Linear (no easing) by default. A bouncy or elastic easing that overshoots past ``0.0``/``1.0``
-mid-transition is supported: only the exact boundary progress reported by the widget itself
-(the transition's true start and end) short-circuits to the source/destination screen; every
-other value, including an overshoot, is passed through your easing function and rendered.
+Progress is linear by default. A bouncy or elastic easing may overshoot past
+``0.0`` or ``1.0`` during the transition. ``AbstractTransition`` applies the
+easing and clamps the result before rendering. Only the widget's exact start
+and end progress skip easing and return the complete source or destination
+screen.
 
 Size
 ----
 
-``SliceTransition``, ``ShuttersTransition`` and ``SpiralTransition`` take a second constructor
-argument controlling the granularity of the effect, in terminal cells: band thickness for the
-first two, block size for ``SpiralTransition``. Larger values give a chunkier animation that is
-also cheaper to compute per frame::
+``SliceTransition``, ``ShuttersTransition`` and ``SpiralTransition`` take a
+``size`` constructor argument that controls the effect's granularity in
+terminal cells. It sets the band thickness for the first two transitions and
+the block size for ``SpiralTransition``. For ``SliceTransition``, ``size``
+applies only to entrances from the top or bottom. The value must be greater
+than zero::
 
-    new ShuttersTransition(TransitionDirection::Horizontal, 2);
+    new SliceTransition(VerticalDirection::Top, size: 2);
 
 Built-in Transitions
----------------------
+--------------------
 
-Snapshots below show progress stages from screen A (``■``) to screen B (``□``).
+The snapshots below show progress stages from screen A (``■``) to screen B
+(``□``).
 
 Slide
 ~~~~~
 
 Pushes the outgoing screen off-frame while the new one slides in behind it::
 
-    new SlideTransition(TransitionDirection::Right);
+    new SlideTransition(HorizontalDirection::Left);
 
 .. code-block:: text
 
@@ -118,9 +147,10 @@ Pushes the outgoing screen off-frame while the new one slides in behind it::
 Wipe
 ~~~~
 
-Reveals the new screen from one edge, like a curtain, without moving the old one::
+Reveals the new screen from one edge, like a curtain, without moving the old
+one::
 
-    new WipeTransition(TransitionDirection::Bottom);
+    new WipeTransition(VerticalDirection::Top);
 
 .. code-block:: text
 
@@ -133,9 +163,10 @@ Reveals the new screen from one edge, like a curtain, without moving the old one
 Slice
 ~~~~~
 
-Alternates opposing bands (``Horizontal``) or reveals adjustable-width columns (``Vertical``)::
+Reveals alternating rows from the left or right, or alternating column bands
+from the top or bottom::
 
-    new SliceTransition(TransitionDirection::Horizontal, sliceSize: 2);
+    new SliceTransition(HorizontalDirection::Left);
 
 .. code-block:: text
 
@@ -150,7 +181,9 @@ Diamond
 
 The new screen grows from, or shrinks into, the center in a diamond shape::
 
-    new DiamondTransition(TransitionDirection::Out);
+    use Symfony\Component\Tui\Transition\Direction\RadialDirection;
+
+    new DiamondTransition(RadialDirection::Outward);
 
 .. code-block:: text
 
@@ -160,15 +193,15 @@ The new screen grows from, or shrinks into, the center in a diamond shape::
     ■■■■■■□□■■■■■■■   ■■■□□□□□□□□■■■■   ■□□□□□□□□□□□□■■   □□□□□□□□□□□□□□□
     ■■■■■■■■■■■■■■■   ■■■■□□□□□□■■■■■   ■■□□□□□□□□□□■■■   □□□□□□□□□□□□□□■
 
-``TransitionDirection::In`` is the mirror: a shrinking diamond of screen A disappears into
-screen B instead.
+``RadialDirection::Inward`` is the mirror: a shrinking diamond of screen A
+disappears into screen B instead.
 
 Shutters
 ~~~~~~~~
 
 Evenly spaced slats reveal the new screen in alternating bands::
 
-    new ShuttersTransition(TransitionDirection::Horizontal, size: 2);
+    new ShuttersTransition(VerticalDirection::Top, size: 2);
 
 .. code-block:: text
 
@@ -183,7 +216,7 @@ Spiral
 
 The new screen unfolds block by block along a spiral path::
 
-    new SpiralTransition(TransitionDirection::Out, size: 3);
+    new SpiralTransition(RadialDirection::Outward, size: 3);
 
 .. code-block:: text
 
@@ -194,7 +227,7 @@ The new screen unfolds block by block along a spiral path::
     □□□□□□■■■■■■■■■   □□□□□□□□□□□□■■■   □□□□□□□□□□□□□□□   □□□□□□□□□□□□□□□
 
 Custom Transitions
---------------------
+------------------
 
 Extend ``AbstractTransition`` and implement ``doBlend()``::
 
@@ -202,25 +235,31 @@ Extend ``AbstractTransition`` and implement ``doBlend()``::
 
     final class FadeToBlackTransition extends AbstractTransition
     {
-        protected function doBlend(array $fromLines, array $toLines, int $width, int $height, float $progress): array
+        protected function doBlend(
+            array $fromLines,
+            array $toLines,
+            int $width,
+            int $height,
+            float $progress,
+        ): array
         {
             return $progress < 0.5 ? $fromLines : $toLines;
         }
     }
 
-``$fromLines``/``$toLines`` are the two screens as ANSI-formatted line arrays, one string per
-row. ``$progress`` is already eased. The widget's own true start and end (``progress`` exactly
-``0.0`` or ``1.0``) are short-circuited by ``AbstractTransition`` to the source/destination
-screen before ``doBlend()`` is ever called, so it only runs for values in between. Pass an
-instance to ``start()`` exactly like a built-in transition.
+``$fromLines`` and ``$toLines`` are the two screens as ANSI-formatted line
+arrays, with one string per row. ``$progress`` is already eased and clamped.
+``AbstractTransition`` returns the source or destination screen before calling
+``doBlend()`` when the widget's progress is exactly ``0.0`` or ``1.0``. Pass
+your transition instance to ``start()`` like a built-in transition.
 
 Styling
 -------
 
-Like any widget, ``TransitionWidget`` accepts padding, borders and a background through the
-Style system (see :doc:`/tui/style/index`). What you actually see during a transition, though,
-is driven by the ``from``/``to`` widgets themselves: style ``TransitionWidget`` only for
-things like a container border around the whole stage.
+Like any widget, ``TransitionWidget`` accepts padding, borders and a background
+through the Style system (see :doc:`/tui/style/index`). The ``from`` and ``to``
+widgets control what you see during a transition. Style ``TransitionWidget``
+for elements around the whole stage, such as a container border.
 
 Events
 ------
